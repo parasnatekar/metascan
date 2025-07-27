@@ -1,0 +1,18 @@
+[
+  {
+    "title": "AI for Healthcare",
+    "authors": ["Dr. A. Bhat", "Dr. C. Deo"],
+    "abstract": "This paper analyzes AI applications in healthcare...",
+    "publication_date": "2024-06-01",
+    "keywords": ["AI", "healthcare"],
+    "categories": ["Artificial Intelligence", "Medicine"]
+  },
+  {
+    "title": "Efficient Energy Systems",
+    "authors": ["E. Green"],
+    "abstract": "New approaches to making energy grids more efficient.",
+    "publication_date": "2023-12-11",
+    "keywords": ["energy", "grids"],
+    "categories": ["Engineering"]
+  }
+]

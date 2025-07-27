@@ -1,0 +1,27 @@
+# Ignore Python virtual environments
+venv/
+metascan_env/
+
+# Ignore __pycache__ and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore environment files
+.env
+.env.*
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore log files
+*.log
+
+# Don't ignore everything
+!.gitignore
+!*.py
+!*.json
+!README.md
+!requirements.txt
