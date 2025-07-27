@@ -1,8 +1,4 @@
-Here is the complete, professional `README.md` content for your **MetaScan: A Research Metadata Indexing System** project:
 
----
-
-```markdown
 # 📚 MetaScan – Research Metadata Indexing System
 
 MetaScan is a powerful, research-oriented document processing and metadata indexing system inspired by the organizational standards of CERN. It ingests structured JSON research documents, applies advanced NLP techniques for enrichment, categorization, and keyword extraction, and enables fast local search via an intuitive Streamlit dashboard.
@@ -18,7 +14,6 @@ MetaScan is a powerful, research-oriented document processing and metadata index
 - ⚡ **MongoDB Backend**: Fast and flexible NoSQL database for scalable document storage.
 - 📥 **Bulk Upload**: Supports batch document ingestion from JSON files.
 
----
 
 ## 🛠️ Tech Stack
 
@@ -47,9 +42,6 @@ MetaScan/
 ├── requirements.txt        # Python dependencies
 └── README.md               # Project overview & usage
 
-````
-
----
 
 ## 🧪 How to Run Locally
 
