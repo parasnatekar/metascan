@@ -29,8 +29,6 @@ MetaScan is a powerful, research-oriented document processing and metadata index
 
 ## 📁 Folder Structure
 
-```
-
 MetaScan/
 ├── dashboard.py            # Main Streamlit dashboard UI
 ├── db.py                   # MongoDB connection setup
