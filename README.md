@@ -1,121 +1,150 @@
 # 📚 MetaScan – Research Metadata Indexing System
 
-MetaScan is a powerful, research-oriented document processing and metadata indexing system inspired by the organizational standards of CERN. It ingests structured JSON research documents, applies advanced NLP techniques for enrichment, categorization, and keyword extraction, and enables fast local search via an intuitive Streamlit dashboard.
+**MetaScan** is a research-oriented document processing and metadata indexing system inspired by the organizational data standards of **CERN**.  
+It enables researchers to **extract**, **analyze**, and **search** scientific metadata using NLP, TF-IDF, and MongoDB — all through a simple, interactive **Streamlit dashboard**.
 
 ---
 
 ## 🚀 Features
 
-- 🔍 **Advanced Search**: Filter documents by keyword, author, year, and category.
-- 🧠 **NLP Enrichment**: Automatic keyword extraction, named entity recognition, and lemmatization.
-- 🗂️ **Auto Categorization**: Rule-based category assignment (e.g., AI, Energy).
-- 📊 **Streamlit Dashboard**: Easy-to-use UI with upload, search, and future analytics views.
-- ⚡ **MongoDB Backend**: Fast and flexible NoSQL database for scalable document storage.
-- 📥 **Bulk Upload**: Supports batch document ingestion from JSON files.
+- 🔍 **Smart Search** — Search by keywords, author, category, or year using MongoDB filters.  
+- 🧠 **NLP-Powered Enrichment** — Uses spaCy and TF-IDF for automatic keyword extraction, lemmatization, and named entity recognition.  
+- 🗂️ **Auto Categorization** — Assigns research categories (e.g., AI, Neuroscience, Energy) based on document metadata and NLP context.  
+- 🧾 **PDF Metadata Extraction** — Upload research papers (PDF) and auto-extract key details like title, author, abstract, and keywords.  
+- 📊 **Streamlit Dashboard** — Interactive UI for upload, search, and visualization with a clean, dark-themed `.streamlit/config.toml` setup.  
+- ⚡ **MongoDB Backend** — Fast, scalable NoSQL database for document storage and indexing.  
+- 📥 **Bulk Upload** — Supports batch ingestion from JSON files or folder-based uploads.  
+- 🔧 **Configurable Architecture** — Modular structure, easy to extend with APIs or new processing pipelines.  
 
 ---
 
 ## 🛠️ Tech Stack
 
-| Layer           | Technologies Used                          |
-|----------------|---------------------------------------------|
-| **Frontend**    | [Streamlit](https://streamlit.io/)         |
-| **Backend**     | Python, Flask (optional for future API)    |
-| **Database**    | MongoDB (Local or Cloud via MongoDB Atlas) |
-| **NLP**         | spaCy, scikit-learn (TF-IDF)               |
-| **Other Tools** | VS Code, Git, GitHub, JSON                 |
+| Layer | Technologies |
+|-------|---------------|
+| **Frontend** | [Streamlit](https://streamlit.io/), HTML/CSS (custom config) |
+| **Backend** | Python 3.x |
+| **Database** | MongoDB (local or [MongoDB Atlas](https://www.mongodb.com/atlas)) |
+| **NLP & ML** | spaCy, scikit-learn (TF-IDF) |
+| **Utilities** | PyMuPDF / pdfminer.six (for PDF extraction), JSON, Git, VS Code |
 
 ---
 
-## 📁 Folder Structure
+## 📁 Project Structure
 
 MetaScan/
-├── dashboard.py # Main Streamlit dashboard UI
+├── dashboard.py # Main Streamlit dashboard (UI + Search)
 ├── db.py # MongoDB connection setup
 ├── ingest.py # JSON document ingestion script
-├── enrich.py # NLP + categorization processing
-├── search.py # Search logic using MongoDB filters
-├── setup_indexes.py # MongoDB indexing for optimization
-├── sample_docs.json # Sample input file
+├── enrich.py # NLP enrichment and categorization
+├── search.py # Search logic and query builder
+├── pdf_extractor.py # New module – PDF metadata extractor
+├── setup_indexes.py # MongoDB indexing and optimization
+├── sample_docs.json # Sample research data
+├── .streamlit/
+│ └── config.toml # Streamlit theme configuration
 ├── requirements.txt # Python dependencies
-└── README.md # Project overview & usage
+└── README.md # Project overview and documentation
 
 yaml
-Copy
-Edit
+Copy code
 
 ---
 
-## 🧪 How to Run Locally
+## ⚙️ Installation & Setup
 
-### 1. Clone the Repo
+### 1️⃣ Clone the Repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/metascan.git
+git clone https://github.com/parasnatekar/metascan.git
 cd metascan
-2. Create Virtual Environment
+2️⃣ Create a Virtual Environment
 bash
-Copy
-Edit
+Copy code
 python -m venv metascan_env
-source metascan_env/bin/activate      # For Linux/macOS
-metascan_env\Scripts\activate         # For Windows
-3. Install Dependencies
+metascan_env\Scripts\activate       # For Windows
+# OR
+source metascan_env/bin/activate    # For macOS/Linux
+3️⃣ Install Dependencies
 bash
-Copy
-Edit
+Copy code
 pip install -r requirements.txt
-4. Start MongoDB Server
-Ensure MongoDB is running locally on localhost:27017.
-Or edit db.py to connect with MongoDB Atlas cloud.
+4️⃣ Start MongoDB
+Make sure MongoDB is running locally on localhost:27017.
+Alternatively, connect to MongoDB Atlas by updating the connection string in db.py.
 
-5. Launch the Dashboard
+5️⃣ Run the Streamlit Dashboard
 bash
-Copy
-Edit
+Copy code
 streamlit run dashboard.py
-Open in your browser at http://localhost:8501
+Open your browser at 👉 http://localhost:8501
 
-📥 Ingest Sample Data
-You can ingest documents using either:
+🧩 Usage
+📥 Uploading Documents
+You can upload and index data in two ways:
 
-Option A – Upload via UI
-Use the sidebar "Upload JSON file" to load sample_docs.json
+Option A – Streamlit UI
+Go to the dashboard sidebar.
 
-Option B – CLI Script
+Upload a .json or .pdf file.
+
+Metadata and keywords will be auto-extracted and saved to MongoDB.
+
+Option B – Command Line
 bash
-Copy
-Edit
+Copy code
 python ingest.py
-🔍 Example Search Queries
-Try searching in the dashboard using:
+🔍 Searching
+Use the dashboard’s filters to search by:
 
-Keyword: AI
+Keyword: “machine learning”
 
-Author: Smith
+Author: “Smith”
 
-Year: 2023
+Category: “Energy”
 
-Category: Energy
+Year: “2023”
 
-🧠 Future Enhancements
-📈 Keyword frequency & category charts
+Results will appear instantly using MongoDB’s optimized text search.
 
-📤 Export search results to CSV/Excel
+🧠 NLP Workflow
+Tokenization & Lemmatization via spaCy
 
-🌐 RESTful API for integration
+TF-IDF keyword extraction
 
-🧪 ML-based document categorization
+Named Entity Recognition (authors, institutions, topics)
 
-🔐 User authentication & document tagging
+Category assignment via rule-based tagging
 
+Metadata stored in MongoDB for retrieval
+
+🧾 PDF Metadata Extraction (New!)
+The pdf_extractor.py module uses PyMuPDF and regex-based parsing to extract:
+
+Title
+
+Author(s)
+
+Abstract
+
+Keywords
+
+You can directly upload research papers in PDF format — the system will parse and index metadata automatically.
+
+🌟 Future Roadmap
+✅ PDF metadata extraction
+✅ Custom Streamlit theme config
+🧩 RESTful API for programmatic access
+📈 Analytics dashboard (keyword & category trends)
+🧮 ML-based document categorization
+🔐 User authentication & tagging
 🌍 Multi-language support
 
 👨‍💻 Author
 Paras Natekar
 🔗 LinkedIn
-📧 parasnatekar@example.com
-🌐 Portfolio: parasnatekar.vercel.app
+🌐 parasnatekar.vercel.app
+📧 paraspnatekar@gmail.com
 
 📄 License
 This project is open-source under the MIT License.
