@@ -8,6 +8,9 @@ import pandas as pd
 from collections import Counter
 import logging
 
+# NEW IMPORTS FOR GRIDFS
+from file_storage import save_pdf_to_gridfs, download_pdf_from_gridfs
+
 # ---------------- Streamlit UI Config ----------------
 st.set_page_config(page_title="MetaScan Dashboard", layout="wide")
 st.markdown("""
@@ -46,6 +49,13 @@ if uploaded_file:
 
     # ---------------- PDF Upload ----------------
     elif uploaded_file.name.endswith(".pdf"):
+
+        # ✅ SAVE PDF INTO GRIDFS
+        file_id = save_pdf_to_gridfs(uploaded_file)
+
+        # Reset pointer so extractor can read PDF
+        uploaded_file.seek(0)
+
         try:
             paper_data = process_pdf(uploaded_file)
         except Exception as e:
@@ -71,6 +81,9 @@ if uploaded_file:
         except Exception as e:
             st.warning(f"⚠️ Metadata enrichment failed: {e}")
             enriched_data = paper_data
+
+        # 🔥 ADD THE FILE ID TO THE DOCUMENT
+        enriched_data["file_id"] = file_id
 
         # --- Preview extracted metadata ---
         st.subheader("🧾 Extracted Metadata Preview")
@@ -116,6 +129,18 @@ if st.sidebar.button("Search"):
                 st.markdown(f"**Category:** {doc.get('category', 'Other')}")
                 st.markdown(f"**Keywords:** {', '.join(doc.get('keywords', []))}")
                 st.markdown(f"**Abstract:** {doc.get('abstract', '')}")
+
+                # ⭐ DOWNLOAD PDF BUTTON (NEW)
+                if "file_id" in doc:
+                    pdf_bytes = download_pdf_from_gridfs(doc["file_id"])
+                    if pdf_bytes:
+                        st.download_button(
+                            label="📥 Download PDF",
+                            data=pdf_bytes,
+                            file_name=f"{doc.get('title','document')}.pdf",
+                            mime="application/pdf",
+                        )
+
                 if 'similarity' in doc:
                     st.markdown(f"**Relevance Score:** {doc['similarity']}")
     else:

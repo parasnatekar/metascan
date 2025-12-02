@@ -1,6 +1,7 @@
 # Ignore Python virtual environments
 venv/
 metascan_env/
+env/
 
 # Ignore __pycache__ and compiled files
 __pycache__/
@@ -19,7 +20,33 @@ Thumbs.db
 # Ignore log files
 *.log
 
-# Don't ignore everything
+# Ignore editor/IDE configs
+.vscode/
+.idea/
+
+# Ignore Streamlit internal files
+.streamlit/
+
+# Ignore Jupyter / miscellaneous caches
+.ipynb_checkpoints/
+share/
+
+# Ignore local MongoDB files (if any accidental dump)
+*.bson
+*.wt
+*.ns
+
+# Ignore build or temporary folders
+dist/
+build/
+temp/
+tmp/
+
+# Ignore large uploaded PDFs if accidentally added
+*.pdf
+!sample.pdf      # allow one sample PDF if needed
+
+# Don't ignore important project files
 !.gitignore
 !*.py
 !*.json

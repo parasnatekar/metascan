@@ -2,32 +2,48 @@
 
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
+import gridfs
 import os
 
-# --- Configurable Mongo URI (env variable preferred) ---
+# --- Configurable Mongo URI ---
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
 DB_NAME = "metascan"
 COLLECTION_NAME = "documents"
 
-def get_db_collection(uri=MONGO_URI, db_name=DB_NAME, collection_name=COLLECTION_NAME):
+
+# Return the DB object
+def get_db(uri=MONGO_URI, db_name=DB_NAME):
     try:
         client = MongoClient(uri, serverSelectionTimeoutMS=3000)
-        client.admin.command('ping')  # Check connection
-        db = client[db_name]
-        collection = db[collection_name]
-        return collection
+        client.admin.command("ping")  # check connection
+        return client[db_name]
     except ConnectionFailure as e:
         print(f"[!] MongoDB connection failed: {e}")
         return None
 
-# Expose collection directly
-collection = get_db_collection()
 
-# --- Optional: Test when running standalone ---
+# Return the collection object
+def get_db_collection(uri=MONGO_URI, db_name=DB_NAME, collection_name=COLLECTION_NAME):
+    db = get_db(uri, db_name)
+    if db is not None:   # FIXED HERE
+        return db[collection_name]
+    return None
+
+
+# --- Initialize DB and Collection ---
+db = get_db()
+collection = db[COLLECTION_NAME] if db is not None else None  # FIXED HERE
+
+
+# --- GridFS Initialization ---
+fs = gridfs.GridFS(db) if db is not None else None  # FIXED HERE
+
+
+# --- Standalone Test ---
 if __name__ == "__main__":
-    if collection:
-        print(f"[+] Connected to MongoDB. Total documents: {collection.count_documents({})}")
-        for doc in collection.find().limit(5):
-            print(doc)
+    if db is not None:
+        print(f"[+] DB Connected: {DB_NAME}")
+        print(f"[+] Collection OK: {collection.name}")
+        print(f"[+] GridFS Ready: {hasattr(fs, 'put')}")
     else:
         print("[!] Could not connect to MongoDB.")
