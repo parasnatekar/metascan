@@ -6,7 +6,12 @@ import gridfs
 import os
 
 # --- Configurable Mongo URI ---
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+MONGO_URI = os.getenv("MONGO_URI")
+
+# ✅ MINIMAL FALLBACK FOR LOCAL ONLY
+if not MONGO_URI:
+    MONGO_URI = "mongodb://localhost:27017/"
+
 DB_NAME = "metascan"
 COLLECTION_NAME = "documents"
 
@@ -25,18 +30,18 @@ def get_db(uri=MONGO_URI, db_name=DB_NAME):
 # Return the collection object
 def get_db_collection(uri=MONGO_URI, db_name=DB_NAME, collection_name=COLLECTION_NAME):
     db = get_db(uri, db_name)
-    if db is not None:   # FIXED HERE
+    if db is not None:
         return db[collection_name]
     return None
 
 
 # --- Initialize DB and Collection ---
 db = get_db()
-collection = db[COLLECTION_NAME] if db is not None else None  # FIXED HERE
+collection = db[COLLECTION_NAME] if db is not None else None
 
 
 # --- GridFS Initialization ---
-fs = gridfs.GridFS(db) if db is not None else None  # FIXED HERE
+fs = gridfs.GridFS(db) if db is not None else None
 
 
 # --- Standalone Test ---
