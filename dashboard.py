@@ -4,6 +4,7 @@ from db import collection
 from search import search_docs
 from enrich import enrich_and_update, enrich_pdf_metadata
 from pdf_extractor import process_pdf
+from ml.recommender import get_similar_papers
 import pandas as pd
 from collections import Counter
 import logging
@@ -129,6 +130,27 @@ if st.sidebar.button("Search"):
                 st.markdown(f"**Category:** {doc.get('category', 'Other')}")
                 st.markdown(f"**Keywords:** {', '.join(doc.get('keywords', []))}")
                 st.markdown(f"**Abstract:** {doc.get('abstract', '')}")
+                # 🔁 Similar Paper Recommendations
+                st.markdown("### 🔁 Similar Papers")
+
+                abstract_text = doc.get("abstract", "")
+                if abstract_text:
+                    similar_papers = get_similar_papers(
+                        abstract_text,
+                        top_n=5
+                    )
+
+                    if similar_papers:
+                        for sp in similar_papers:
+                            st.markdown(
+                                f"- **{sp['title']}** "
+                                f"({sp['category']}) "
+                                f"— similarity: {round(sp['similarity_score'], 3)}"
+                            )
+                    else:
+                        st.info("No similar papers found.")
+                else:
+                    st.info("No abstract available for similarity matching.")
 
                 # ⭐ DOWNLOAD PDF BUTTON (NEW)
                 if "file_id" in doc:

@@ -1,13 +1,33 @@
 # enrich.py
-from db import collection
-import spacy
-from sklearn.feature_extraction.text import TfidfVectorizer
-from collections import Counter
+
+import os
+import pickle
 import subprocess
 import sys
 import re
 
-# ---------------- Load spaCy English model ---------------- #
+from db import collection
+import spacy
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+# ---------------- Load ML Category Model ---------------- #
+MODEL_PATH = os.path.join("ml", "ml_category_model.pkl")
+
+ml_vectorizer = None
+ml_model = None
+
+if os.path.exists(MODEL_PATH):
+    with open(MODEL_PATH, "rb") as f:
+        saved = pickle.load(f)   # ✅ FIX: load dict correctly
+        ml_vectorizer = saved.get("vectorizer")
+        ml_model = saved.get("model")
+
+    print("✅ ML category model loaded")
+else:
+    print("⚠️ ML category model not found")
+
+
+# ---------------- Load spaCy Model ---------------- #
 try:
     nlp = spacy.load("en_core_web_sm")
 except OSError:
@@ -15,39 +35,52 @@ except OSError:
     nlp = spacy.load("en_core_web_sm")
 
 
+# ---------------- ML Category Prediction ---------------- #
+def predict_ml_category(abstract):
+    """
+    Predict category using trained ML model.
+    Falls back safely if model is unavailable.
+    """
+    if not abstract or ml_model is None or ml_vectorizer is None:
+        return None
+
+    try:
+        X = ml_vectorizer.transform([abstract])
+        return ml_model.predict(X)[0]
+    except Exception as e:
+        print(f"⚠️ ML prediction error: {e}")
+        return None
+
+
 # ---------------- 1. Text Preprocessing ---------------- #
 def clean_text(text):
-    """
-    Lemmatize text, remove stopwords, and keep only alphabetic tokens.
-    Returns a clean, lowercase lemmatized string.
-    """
     if not text:
         return ""
     doc = nlp(text.lower())
-    tokens = [token.lemma_ for token in doc if not token.is_stop and token.is_alpha]
+    tokens = [t.lemma_ for t in doc if t.is_alpha and not t.is_stop]
     return " ".join(tokens)
 
 
 # ---------------- 2. Keyword Extraction ---------------- #
 def extract_keywords(docs, top_n=5):
-    """
-    Extract top N keywords from a list of documents using TF-IDF.
-    Expects docs = [{'abstract': '...'}, ...]
-    """
     abstracts = [doc.get("abstract", "") for doc in docs]
     if not abstracts:
         return [[] for _ in docs]
 
     try:
-        vectorizer = TfidfVectorizer(stop_words="english", max_features=100)
-        tfidf = vectorizer.fit_transform(abstracts)
-        feature_names = vectorizer.get_feature_names_out()
+        tfidf_vectorizer = TfidfVectorizer(   # ✅ FIX: renamed
+            stop_words="english",
+            max_features=100
+        )
+        tfidf = tfidf_vectorizer.fit_transform(abstracts)
+        features = tfidf_vectorizer.get_feature_names_out()
 
-        keywords_matrix = []
+        keywords_list = []
         for row in tfidf:
             indices = row.toarray()[0].argsort()[-top_n:][::-1]
-            keywords_matrix.append([feature_names[i] for i in indices])
-        return keywords_matrix
+            keywords_list.append([features[i] for i in indices])
+        return keywords_list
+
     except Exception as e:
         print(f"⚠️ Keyword extraction failed: {e}")
         return [[] for _ in docs]
@@ -55,121 +88,103 @@ def extract_keywords(docs, top_n=5):
 
 # ---------------- 3. Entity Extraction ---------------- #
 def extract_entities(text):
-    """
-    Extract named entities (ORG, PERSON, GPE, etc.) from text.
-    Returns a unique list of entity strings.
-    """
     if not text:
         return []
     doc = nlp(text)
     return list(set(ent.text.strip() for ent in doc.ents if ent.text.strip()))
 
 
-# ---------------- 4. Category Assignment ---------------- #
+# ---------------- 4. Rule-based Category (Fallback) ---------------- #
 CATEGORY_KEYWORDS = {
-    "AI / Machine Learning": [
-        "machine learning", "deep learning", "neural network", "classification", "regression",
-        "supervised", "unsupervised", "cnn", "rnn", "svm", "transformer"
-    ],
-    "Data Management": [
-        "metadata", "data management", "repository", "ontology", "data sharing",
-        "rdm", "database", "data curation", "data storage", "data pipeline"
-    ],
-    "Computer Vision": ["image", "object detection", "segmentation", "video analysis", "image processing"],
-    "Natural Language Processing": [
-        "nlp", "text mining", "language model", "bert", "transformer", "tokenization", "embedding"
-    ],
-    "Healthcare / Bioinformatics": [
-        "medical", "healthcare", "patient", "disease", "clinical", "genomic", "bioinformatics", "covid"
-    ],
-    "Cybersecurity": [
-        "security", "encryption", "cyber", "malware", "attack", "vulnerability", "firewall"
-    ],
-    "Robotics": ["robot", "autonomous", "manipulation", "drone", "actuator"],
-    "Social Sciences / Psychology": [
-        "psychology", "education", "survey", "behavior", "sociology", "learning", "cognitive"
-    ],
-    "Physics / Engineering": ["quantum", "particle", "energy", "battery", "solar", "physics", "engineering"],
+    "AI / Machine Learning": ["machine learning", "deep learning", "neural network"],
+    "Data Management": ["metadata", "data management", "repository", "rdm"],
+    "Computer Vision": ["image", "segmentation", "object detection"],
+    "Natural Language Processing": ["nlp", "text mining", "language model"],
+    "Healthcare / Bioinformatics": ["medical", "healthcare", "clinical", "bioinformatics"],
+    "Cybersecurity": ["security", "encryption", "malware"],
+    "Robotics": ["robot", "autonomous", "drone"],
+    "Social Sciences / Psychology": ["psychology", "education", "behavior"],
+    "Physics / Engineering": ["quantum", "energy", "physics", "engineering"],
 }
 
 
 def assign_category(text):
-    """
-    Assign a semantic category based on abstract keywords.
-    Falls back to 'Other' if no match.
-    """
     if not text:
         return "Other"
-
     text = text.lower()
-    for category, keywords in CATEGORY_KEYWORDS.items():
-        for kw in keywords:
-            if re.search(rf"\b{re.escape(kw)}\b", text):
-                return category
-
+    for cat, words in CATEGORY_KEYWORDS.items():
+        for w in words:
+            if re.search(rf"\b{re.escape(w)}\b", text):
+                return cat
     return "Other"
 
 
-# ---------------- 5. Enrichment for a single PDF ---------------- #
+# ---------------- 5. Enrich Single PDF Metadata ---------------- #
 def enrich_pdf_metadata(metadata):
-    """
-    Enrich a single PDF metadata dictionary before inserting into MongoDB.
-    Adds cleaned_text, keywords, entities, and category.
-    """
     abstract = metadata.get("abstract", "")
+
     cleaned = clean_text(abstract)
     entities = extract_entities(abstract)
-    category = assign_category(abstract)
 
-    # Compute local TF-IDF keywords for just this abstract
+    ml_category = predict_ml_category(abstract)
+    rule_category = assign_category(abstract)
+    final_category = ml_category if ml_category else rule_category
+
     try:
-        vectorizer = TfidfVectorizer(stop_words="english", max_features=5)
-        tfidf = vectorizer.fit_transform([abstract])
-        keywords = list(vectorizer.get_feature_names_out())
+        tfidf_vec = TfidfVectorizer(   # ✅ FIX: renamed
+            stop_words="english",
+            max_features=5
+        )
+        tfidf_vec.fit([abstract])
+        keywords = list(tfidf_vec.get_feature_names_out())
     except Exception:
         keywords = []
 
-    metadata.update(
-        {
-            "cleaned_text": cleaned,
-            "keywords": keywords,
-            "entities": entities,
-            "category": category,
-        }
-    )
+    metadata.update({
+        "cleaned_text": cleaned,
+        "keywords": keywords,
+        "entities": entities,
+        "category": final_category
+    })
+
     return metadata
 
 
-# ---------------- 6. Bulk Enrichment for all DB docs ---------------- #
+# ---------------- 6. Enrich All DB Documents ---------------- #
 def enrich_and_update():
-    """
-    Enrich all documents in MongoDB with cleaned_text, keywords, entities, and category.
-    """
     docs = list(collection.find())
     if not docs:
         print("⚠️ No documents found in database.")
         return
 
-    keywords_list = extract_keywords(docs, top_n=5)
+    keywords_list = extract_keywords(docs)
 
     for idx, doc in enumerate(docs):
         abstract = doc.get("abstract", "")
+
         cleaned = clean_text(abstract)
         entities = extract_entities(abstract)
-        category = assign_category(abstract)
-        keywords = keywords_list[idx]
+
+        ml_category = predict_ml_category(abstract)
+        rule_category = assign_category(abstract)
+        final_category = ml_category if ml_category else rule_category
+
+        print(
+            f"ML={ml_category} | RULE={rule_category} | FINAL={final_category}"
+        )
+
 
         enriched = {
             "cleaned_text": cleaned,
-            "keywords": keywords,
+            "keywords": keywords_list[idx],
             "entities": entities,
-            "category": category,
+            "category": final_category
         }
 
         collection.update_one({"_id": doc["_id"]}, {"$set": enriched})
-        print(f"✅ Enriched: {doc.get('title', 'Untitled')} → {category}")
+        print(f"✅ Enriched: {doc.get('title', 'Untitled')} → {final_category}")
 
 
-# ---------------- Manual Testing ---------------- #
+# ---------------- Manual Run ---------------- #
 if __name__ == "__main__":
     enrich_and_update()
