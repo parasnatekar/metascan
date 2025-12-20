@@ -1,6 +1,6 @@
 import streamlit as st
 import json
-from db import collection
+from db import collection, db
 from search import search_docs
 from enrich import enrich_and_update, enrich_pdf_metadata
 from pdf_extractor import process_pdf
@@ -8,75 +8,133 @@ from ml.recommender import get_similar_papers
 import pandas as pd
 from collections import Counter
 import logging
+import bcrypt
+from datetime import datetime
 
 # NEW IMPORTS FOR GRIDFS
 from file_storage import save_pdf_to_gridfs, download_pdf_from_gridfs
 
-# ---------------- Streamlit UI Config ----------------
-st.set_page_config(page_title="MetaScan Dashboard", layout="wide")
-st.markdown("""
-    <style>
-        .stApp { background: linear-gradient(to bottom right, #0E1117, #1E2025); color: white; }
-        .big-title { text-align:center; font-size:36px; color:#00BFFF; font-weight:bold; margin-top:10px; }
-        .sub-title { text-align:center; color:#CCCCCC; font-size:18px; margin-bottom:30px; }
-    </style>
-""", unsafe_allow_html=True)
-st.markdown("<div class='big-title'>MetaScan Dashboard</div><div class='sub-title'>AI-Powered Research Metadata Indexing</div>", unsafe_allow_html=True)
+# ================= AUTH SETUP =================
+users_collection = db["users"]
 
-# ---------------- Logger ----------------
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+def hash_password(password):
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+
+def verify_password(password, hashed):
+    return bcrypt.checkpw(password.encode(), hashed)
+
+# Session defaults
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+# ================= LOGIN / REGISTER UI =================
+if not st.session_state.logged_in:
+    st.set_page_config(page_title="MetaScan Login", layout="centered")
+
+    st.markdown("## 🔐 MetaScan Authentication")
+
+    tab1, tab2 = st.tabs(["Login", "Register"])
+
+    with tab1:
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
+
+        if st.button("Login"):
+            user = users_collection.find_one({"email": email})
+            if user and verify_password(password, user["password"]):
+                st.session_state.logged_in = True
+                st.session_state.user = {
+                    "username": user["username"],
+                    "email": user["email"],
+                    "role": user["role"]
+                }
+                st.success("✅ Login successful")
+                st.rerun()
+            else:
+                st.error("❌ Invalid credentials")
+
+    with tab2:
+        username = st.text_input("Username")
+        reg_email = st.text_input("Register Email")
+        reg_password = st.text_input("Register Password", type="password")
+        confirm = st.text_input("Confirm Password", type="password")
+
+        if st.button("Create Account"):
+            if reg_password != confirm:
+                st.error("❌ Passwords do not match")
+            elif users_collection.find_one({"email": reg_email}):
+                st.error("❌ User already exists")
+            else:
+                users_collection.insert_one({
+                    "username": username,
+                    "email": reg_email,
+                    "password": hash_password(reg_password),
+                    "role": "researcher",
+                    "created_at": datetime.utcnow()
+                })
+                st.success("✅ Account created. Please login.")
+
+    st.stop()
+
+# ================= MAIN DASHBOARD =================
+st.set_page_config(page_title="MetaScan Dashboard", layout="wide")
+
+st.markdown("""
+<style>
+.stApp { background: linear-gradient(to bottom right, #0E1117, #1E2025); color: white; }
+.big-title { text-align:center; font-size:36px; color:#00BFFF; font-weight:bold; }
+.sub-title { text-align:center; color:#CCCCCC; font-size:18px; margin-bottom:30px; }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown(
+    "<div class='big-title'>MetaScan Dashboard</div>"
+    "<div class='sub-title'>AI-Powered Research Metadata Indexing</div>",
+    unsafe_allow_html=True
+)
+
+# Logger
+logging.basicConfig(level=logging.INFO)
+
+# Sidebar user info + logout
+st.sidebar.markdown(f"👤 **Logged in as:** {st.session_state.user['username']}")
+st.sidebar.markdown("---")
+if st.sidebar.button("🚪 Logout"):
+    st.session_state.logged_in = False
+    st.session_state.user = None
+    st.rerun()
 
 # ---------------- Sidebar Upload ----------------
 st.sidebar.header("📤 Upload Documents")
 uploaded_file = st.sidebar.file_uploader("Upload JSON or PDF", type=["json", "pdf"])
 
 if uploaded_file:
-    # ---------------- JSON Upload ----------------
     if uploaded_file.name.endswith(".json"):
-        try:
-            data = json.load(uploaded_file)
-            if isinstance(data, list):
-                inserted = 0
-                for doc in data:
-                    if not collection.find_one({"title": doc.get("title")}):
-                        collection.insert_one(doc)
-                        inserted += 1
-                st.sidebar.success(f"✅ {inserted} new document(s) added.")
-                enrich_and_update()
-            else:
-                st.sidebar.error("❌ JSON file must contain a list of documents.")
-        except Exception as e:
-            st.sidebar.error(f"Error: {e}")
+        data = json.load(uploaded_file)
+        if isinstance(data, list):
+            for doc in data:
+                if not collection.find_one({"title": doc.get("title")}):
+                    collection.insert_one(doc)
+            enrich_and_update()
+            st.sidebar.success("✅ JSON uploaded & enriched")
 
-    # ---------------- PDF Upload ----------------
     elif uploaded_file.name.endswith(".pdf"):
-
-        # ✅ SAVE PDF INTO GRIDFS
         file_id = save_pdf_to_gridfs(uploaded_file)
-
-        # Reset pointer so extractor can read PDF
         uploaded_file.seek(0)
 
-        try:
-            paper_data = process_pdf(uploaded_file)
-        except Exception as e:
-            st.error(f"❌ Failed to process PDF: {e}")
-            paper_data = None
+        paper_data = process_pdf(uploaded_file) or {
+            "title": uploaded_file.name.replace(".pdf", ""),
+            "abstract": "",
+            "keywords": [],
+            "authors": [],
+            "year": "",
+            "category": "Uncategorized",
+            "source": "PDF upload"
+        }
 
-        # --- If extraction fails, fallback to minimal record ---
-        if not paper_data:
-            st.warning("⚠️ Could not extract metadata. Using fallback document.")
-            paper_data = {
-                "title": uploaded_file.name.replace(".pdf", ""),
-                "abstract": "",
-                "keywords": [],
-                "authors": [],
-                "year": "",
-                "category": "Uncategorized",
-                "source": "PDF upload (fallback)",
-            }
-
-        # --- Attempt metadata enrichment ---
+# --- Attempt metadata enrichment ---
         try:
             enriched_data = enrich_pdf_metadata(paper_data)
         except Exception as e:
@@ -111,7 +169,8 @@ if uploaded_file:
             except Exception as e:
                 st.error(f"❌ Database insert failed: {e}")
 
-# ---------------- Search Filters ----------------
+
+# ---------------- Search ----------------
 st.sidebar.header("🔍 Search Filters")
 keyword = st.sidebar.text_input("Keyword")
 author = st.sidebar.text_input("Author")
@@ -119,79 +178,41 @@ year = st.sidebar.text_input("Year")
 category = st.sidebar.text_input("Category")
 
 if st.sidebar.button("Search"):
-    results = search_docs(keyword=keyword, author=author, year=year, category=category)
+    results = search_docs(keyword, author, year, category)
     st.subheader(f"🔎 {len(results)} result(s) found")
 
-    if results:
-        for i, doc in enumerate(results, 1):
-            with st.expander(f"{i}. {doc.get('title', 'Untitled')}"):
-                st.markdown(f"**Authors:** {', '.join(doc.get('authors', []))}")
-                st.markdown(f"**Year:** {doc.get('year', 'Unknown')}")
-                st.markdown(f"**Category:** {doc.get('category', 'Other')}")
-                st.markdown(f"**Keywords:** {', '.join(doc.get('keywords', []))}")
-                st.markdown(f"**Abstract:** {doc.get('abstract', '')}")
-                # 🔁 Similar Paper Recommendations
-                st.markdown("### 🔁 Similar Papers")
+    for i, doc in enumerate(results, 1):
+        with st.expander(f"{i}. {doc.get('title')}"):
+            st.markdown(f"**Category:** {doc.get('category')}")
+            st.markdown(f"**Abstract:** {doc.get('abstract')}")
 
-                abstract_text = doc.get("abstract", "")
-                if abstract_text:
-                    similar_papers = get_similar_papers(
-                        abstract_text,
-                        top_n=5
+            st.markdown("### 🔁 Similar Papers")
+            for sp in get_similar_papers(doc.get("abstract", ""), top_n=5):
+                st.markdown(
+                    f"- **{sp['title']}** ({sp['category']}) "
+                    f"— {round(sp['similarity_score'],3)}"
+                )
+
+            if "file_id" in doc:
+                pdf = download_pdf_from_gridfs(doc["file_id"])
+                if pdf:
+                    st.download_button(
+                        "📥 Download PDF",
+                        pdf,
+                        file_name=f"{doc['title']}.pdf",
+                        key=f"dl_{i}"
                     )
-
-                    if similar_papers:
-                        for sp in similar_papers:
-                            st.markdown(
-                                f"- **{sp['title']}** "
-                                f"({sp['category']}) "
-                                f"— similarity: {round(sp['similarity_score'], 3)}"
-                            )
-                    else:
-                        st.info("No similar papers found.")
-                else:
-                    st.info("No abstract available for similarity matching.")
-
-                # ⭐ DOWNLOAD PDF BUTTON (NEW)
-                if "file_id" in doc:
-                    pdf_bytes = download_pdf_from_gridfs(doc["file_id"])
-                    if pdf_bytes:
-                        st.download_button(
-                            label="📥 Download PDF",
-                            data=pdf_bytes,
-                            file_name=f"{doc.get('title','document')}.pdf",
-                            mime="application/pdf",
-                        )
-
-                if 'similarity' in doc:
-                    st.markdown(f"**Relevance Score:** {doc['similarity']}")
-    else:
-        st.info("No documents match your search criteria.")
 
 # ---------------- Analytics ----------------
 st.subheader("📊 Document Analytics")
 docs = list(collection.find())
 
 if docs:
-    for doc in docs:
-        if not isinstance(doc.get('keywords'), list):
-            doc['keywords'] = []
-
     df = pd.DataFrame(docs)
+    if "category" in df:
+        st.bar_chart(df["category"].value_counts())
 
-    # --- Category Distribution ---
-    if "category" in df.columns:
-        st.markdown("### 📂 Category Distribution")
-        category_counts = df['category'].value_counts()
-        st.bar_chart(category_counts)
-
-    # --- Keyword Frequency ---
-    if "keywords" in df.columns:
-        st.markdown("### 🔑 Keyword Frequency")
-        all_keywords = [kw for sublist in df['keywords'] if isinstance(sublist, (list, tuple)) for kw in sublist]
-        if all_keywords:
-            keyword_counts = Counter(all_keywords)
-            keyword_df = pd.DataFrame(keyword_counts.items(), columns=["Keyword", "Count"]).sort_values("Count", ascending=False)
-            st.dataframe(keyword_df.head(15))
-else:
-    st.info("No documents found in database.")
+    if "keywords" in df:
+        all_keywords = [k for sub in df["keywords"] if isinstance(sub, list) for k in sub]
+        kw_df = pd.DataFrame(Counter(all_keywords).items(), columns=["Keyword", "Count"])
+        st.dataframe(kw_df.sort_values("Count", ascending=False).head(15))
