@@ -79,8 +79,9 @@ def search_docs(keyword=None, author=None, year=None, category=None, limit=20):
     if category:
         query["category"] = {"$regex": f".*{category}.*", "$options": "i"}
 
-    projection = {"_id": 0}
-    mongo_results = list(collection.find(query, projection).limit(limit))
+    projection = {}  # DO NOT REMOVE _id
+    mongo_results = list(collection.find(query).limit(limit))
+
 
     if not mongo_results:
         return []
