@@ -57,6 +57,9 @@ def search_documents(keyword, documents, vectorizer, tfidf_matrix, top_n=20):
         if score <= 0:  # skip irrelevant results
             continue
         doc = documents[idx].copy()
+        # 🔥 CRITICAL: preserve MongoDB _id
+        doc["_id"] = documents[idx]["_id"]
+        
         doc["similarity"] = round(score, 3)
         results.append(doc)
         if len(results) >= top_n:

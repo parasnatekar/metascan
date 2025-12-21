@@ -216,6 +216,8 @@ if results:
 
     for i, doc in enumerate(results, 1):
         paper_id = doc["_id"]
+        if not paper_id:
+            continue
 
         with st.expander(f"{i}. {doc.get('title', 'Untitled')}"):
 
