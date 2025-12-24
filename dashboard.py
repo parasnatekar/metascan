@@ -393,16 +393,110 @@ else:
                         key=f"myup_dl_{doc['_id']}"
                     )
 
-# ---------------- Analytics ----------------
-st.subheader("📊 Document Analytics")
+# ================= ANALYTICS DASHBOARD =================
+st.subheader("📊 Research Analytics Overview")
+
 docs = list(collection.find())
 
-if docs:
+if not docs:
+    st.info("No documents available for analytics.")
+else:
     df = pd.DataFrame(docs)
-    if "category" in df:
-        st.bar_chart(df["category"].value_counts())
 
-    if "keywords" in df:
-        all_keywords = [k for sub in df["keywords"] if isinstance(sub, list) for k in sub]
-        kw_df = pd.DataFrame(Counter(all_keywords).items(), columns=["Keyword", "Count"])
-        st.dataframe(kw_df.sort_values("Count", ascending=False).head(15))
+    # ----------- METRICS ROW -----------
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("📄 Total Papers", len(df))
+
+    with col2:
+        st.metric("📚 Unique Categories", df["category"].nunique() if "category" in df else 0)
+
+    with col3:
+        st.metric("⭐ Total Bookmarks", sum(
+            len(u.get("bookmarks", [])) for u in users_collection.find()
+        ))
+
+    st.markdown("---")
+
+    # ----------- CATEGORY DISTRIBUTION -----------
+    if "category" in df:
+        st.markdown("### 📂 Papers by Category")
+        category_counts = df["category"].value_counts()
+        st.bar_chart(category_counts)
+
+    # ----------- PAPERS PER YEAR -----------
+    if "year" in df:
+        st.markdown("### 📅 Papers by Year")
+        year_counts = df["year"].value_counts().sort_index()
+        st.line_chart(year_counts)
+
+# ----------- KEYWORD ANALYTICS (INTERACTIVE) ----------- #
+st.subheader("🏷️ Keyword Analytics")
+
+if "keywords" in df:
+    all_keywords = []
+    for kws in df["keywords"]:
+        if isinstance(kws, list):
+            all_keywords.extend(kws)
+
+    if all_keywords:
+        kw_counter = Counter(all_keywords)
+        kw_df = pd.DataFrame(
+            kw_counter.items(),
+            columns=["Keyword", "Count"]
+        ).sort_values("Count", ascending=False)
+
+        # Show top keywords table (clean, no random index)
+        st.markdown("### 🔝 Top Keywords")
+        st.dataframe(
+            kw_df.head(15).reset_index(drop=True),
+            width="stretch"
+        )
+
+        # Keyword selector
+        st.markdown("### 🔍 Explore Papers by Keyword")
+        selected_keyword = st.selectbox(
+            "Select a keyword",
+            options=["-- Select --"] + kw_df["Keyword"].tolist()
+        )
+
+        if selected_keyword != "-- Select --":
+            st.markdown(f"### 📄 Papers related to **{selected_keyword}**")
+
+            matched_docs = collection.find(
+                {"keywords": selected_keyword}
+            )
+
+            found = False
+            for doc in matched_docs:
+                found = True
+                with st.expander(doc.get("title", "Untitled")):
+                    st.markdown(f"**Category:** {doc.get('category', 'N/A')}")
+                    st.markdown(f"**Year:** {doc.get('year', 'N/A')}")
+                    st.markdown(f"**Abstract:** {doc.get('abstract', 'Not available')}")
+
+            if not found:
+                st.info("No papers found for this keyword.")
+
+    else:
+        st.info("No keywords available for analytics.")
+
+    # ----------- MOST BOOKMARKED PAPERS -----------
+    st.markdown("### ⭐ Most Bookmarked Papers")
+
+    bookmark_counts = Counter()
+    for user in users_collection.find():
+        for pid in user.get("bookmarks", []):
+            bookmark_counts[str(pid)] += 1
+
+    if bookmark_counts:
+        popular = bookmark_counts.most_common(5)
+
+        for pid, count in popular:
+            paper = collection.find_one({"_id": ObjectId(pid)})
+            if paper:
+                st.write(f"**{paper.get('title', 'Untitled')}** — ⭐ {count}")
+    else:
+        st.info("No bookmarks yet.")
+
