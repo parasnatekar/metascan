@@ -2,40 +2,55 @@ from db import collection
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# ---------------- TF-IDF Index Builder ---------------- #
 def build_search_index(documents):
-    """
-    Build TF-IDF index from all meaningful document fields for keyword search.
-    """
     corpus = []
+
     for doc in documents:
-        # Extract text-based fields safely
         title = doc.get("title", "")
         abstract = doc.get("abstract", "")
+        cleaned_text = doc.get("cleaned_text", "")
+
         keywords = doc.get("keywords", [])
         if isinstance(keywords, list):
             keywords = " ".join(keywords)
+
+        topics = doc.get("topics", [])
+        if isinstance(topics, list):
+            topics = " ".join(topics)
+
+        entities = doc.get("entities", [])
+        if isinstance(entities, list):
+            entities = " ".join(entities)
+
         authors = doc.get("authors", [])
         if isinstance(authors, list):
             authors = " ".join(authors)
+
         category = doc.get("category", "")
 
-        # Merge all fields into one searchable text
-        combined_text = " ".join([title, abstract, keywords, authors, category]).strip()
+        combined_text = " ".join([
+            title,
+            abstract,
+            cleaned_text,
+            keywords,
+            topics,
+            entities,
+            authors,
+            category
+        ]).strip()
+
         corpus.append(combined_text)
 
-    # Configure TF-IDF with better phrase and weighting support
     vectorizer = TfidfVectorizer(
         stop_words="english",
         lowercase=True,
-        ngram_range=(1, 2),       # include unigrams + bigrams
+        ngram_range=(1, 2),
         sublinear_tf=True,
-        max_features=10000        # keeps model efficient
+        max_features=12000
     )
 
     tfidf_matrix = vectorizer.fit_transform(corpus)
-    return vectorizer, tfidf_matrix
-
+    return vectorizer, tfidf_matrix   
 
 # ---------------- TF-IDF Search ---------------- #
 def search_documents(keyword, documents, vectorizer, tfidf_matrix, top_n=20):
@@ -69,7 +84,7 @@ def search_documents(keyword, documents, vectorizer, tfidf_matrix, top_n=20):
 
 
 # ---------------- Main Search Function ---------------- #
-def search_docs(keyword=None, author=None, year=None, category=None, limit=20):
+def search_docs(keyword=None, author=None, year=None, category=None, limit=1000):
     """
     Search MongoDB documents by author, year, category, and keyword (TF-IDF).
     """

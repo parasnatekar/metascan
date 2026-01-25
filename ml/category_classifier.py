@@ -1,51 +1,89 @@
-import pickle
+# category_classifier.py
+
+from pymongo import MongoClient
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report
+import joblib
 
-MODEL_PATH = "ml/category_model.pkl"
-VECTORIZER_PATH = "ml/tfidf_vectorizer.pkl"
+# -----------------------------
+# 1. MongoDB connection
+# -----------------------------
+client = MongoClient("mongodb://localhost:27017/")
+db = client["metascan"]
+collection = db["documents"]  # ✅ confirmed
 
+# -----------------------------
+# 2. Load data
+# -----------------------------
+texts = []
+labels = []
 
-def train_category_model(texts, labels):
-    """
-    Train ML model using abstracts and categories
-    """
-    vectorizer = TfidfVectorizer(
-        max_features=3000,
-        stop_words="english"
-    )
+for doc in collection.find({"category": {"$exists": True}}):
+    title = doc.get("title", "")
+    abstract = doc.get("abstract", "")
+    category = doc.get("category")
 
-    X = vectorizer.fit_transform(texts)
+    text = f"{title} {abstract}".strip()
 
-    model = LogisticRegression(
-        max_iter=1000,
-        n_jobs=1
-    )
-    model.fit(X, labels)
+    if text and category:
+        texts.append(text)
+        labels.append(category)
 
-    # Save model & vectorizer
-    with open(MODEL_PATH, "wb") as f:
-        pickle.dump(model, f)
+print(f"\nLoaded {len(texts)} labeled documents")
 
-    with open(VECTORIZER_PATH, "wb") as f:
-        pickle.dump(vectorizer, f)
+# -----------------------------
+# 3. Train-test split
+# -----------------------------
+X_train, X_test, y_train, y_test = train_test_split(
+    texts,
+    labels,
+    test_size=0.2,
+    random_state=42,
+    stratify=labels
+)
 
-    print("✅ ML category model trained and saved.")
+# -----------------------------
+# 4. Vectorization
+# -----------------------------
+vectorizer = TfidfVectorizer(
+    max_features=5000,
+    ngram_range=(1, 2),
+    stop_words="english"
+)
 
+X_train_vec = vectorizer.fit_transform(X_train)
+X_test_vec = vectorizer.transform(X_test)
 
-def predict_category(text):
-    """
-    Predict category for a new abstract
-    """
-    try:
-        with open(MODEL_PATH, "rb") as f:
-            model = pickle.load(f)
+# -----------------------------
+# 5. Model training
+# -----------------------------
+model = LogisticRegression(
+    max_iter=1000,
+    n_jobs=-1
+)
 
-        with open(VECTORIZER_PATH, "rb") as f:
-            vectorizer = pickle.load(f)
+model.fit(X_train_vec, y_train)
 
-        X = vectorizer.transform([text])
-        return model.predict(X)[0]
+# -----------------------------
+# 6. Evaluation
+# -----------------------------
+y_pred = model.predict(X_test_vec)
 
-    except Exception:
-        return None
+accuracy = accuracy_score(y_test, y_pred)
+
+print("\n============================")
+print(f"Validation Accuracy: {accuracy:.4f}")
+print("============================\n")
+print(classification_report(y_test, y_pred))
+
+# -----------------------------
+# 7. Save BOTH model & vectorizer
+# -----------------------------
+joblib.dump(model, "category_model.pkl")
+joblib.dump(vectorizer, "category_vectorizer.pkl")
+
+print("\n✅ category_model.pkl saved")
+print("✅ category_vectorizer.pkl saved")
+print("🎉 Training completed")

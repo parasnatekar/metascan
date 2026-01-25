@@ -1,7 +1,7 @@
 # enrich.py
 
 import os
-import pickle
+import joblib
 import subprocess
 import sys
 import re
@@ -11,21 +11,33 @@ import spacy
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 # ---------------- Load ML Category Model ---------------- #
-MODEL_PATH = os.path.join("ml", "ml_category_model.pkl")
+# ---------------- Load ML Category Model (FINAL) ---------------- #
 
-ml_vectorizer = None
+import os
+import joblib
+
+MODEL_PATH = os.path.join("ml", "category_model.pkl")
+VECTORIZER_PATH = os.path.join("ml", "category_vectorizer.pkl")
+
 ml_model = None
+ml_vectorizer = None
 
-if os.path.exists(MODEL_PATH):
-    with open(MODEL_PATH, "rb") as f:
-        saved = pickle.load(f)   # ✅ FIX: load dict correctly
-        ml_vectorizer = saved.get("vectorizer")
-        ml_model = saved.get("model")
+try:
+    if not os.path.exists(MODEL_PATH):
+        raise FileNotFoundError("category_model.pkl not found")
 
-    print("✅ ML category model loaded")
-else:
-    print("⚠️ ML category model not found")
+    if not os.path.exists(VECTORIZER_PATH):
+        raise FileNotFoundError("category_vectorizer.pkl not found")
 
+    ml_model = joblib.load(MODEL_PATH)
+    ml_vectorizer = joblib.load(VECTORIZER_PATH)
+
+    print("✅ ML category model & vectorizer loaded successfully")
+
+except Exception as e:
+    print(f"⚠️ ML model loading failed: {e}")
+    ml_model = None
+    ml_vectorizer = None
 
 # ---------------- Load spaCy Model ---------------- #
 try:
