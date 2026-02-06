@@ -113,3 +113,161 @@ def search_docs(keyword=None, author=None, year=None, category=None, limit=1000)
 
     return results
 
+
+# ================= STREAMLIT SEARCH UI (MOVED FROM DASHBOARD) =================
+import streamlit as st
+import time
+from ml.recommender import get_similar_papers
+from admin.logger import log_search, log_perf
+
+def render_search_module(
+    safe_filename,
+    get_pdf_bytes_cached,
+    add_bookmark,
+    remove_bookmark,
+    get_user_bookmarks
+):
+    # ---------------- Search ----------------
+    st.subheader("🔍 Search Research Papers")
+
+    keyword = st.text_input("Keyword")
+    author = st.text_input("Author")
+    year = st.text_input("Year")
+    category = st.text_input("Category")
+
+    if st.button("Search"):
+        st.session_state.results = search_docs(keyword, author, year, category)
+
+        q = " ".join([
+            str(keyword or "").strip(),
+            str(author or "").strip(),
+            str(year or "").strip(),
+            str(category or "").strip()
+        ]).strip()
+
+        results_count = len(st.session_state.results or [])
+
+        log_search(
+            st.session_state.user["email"],
+            q if q else "(empty)",
+            results_count,
+            filters={"keyword": keyword, "author": author, "year": year, "category": category}
+        )
+
+
+    # Always initialize results
+    if "results" not in st.session_state:
+        st.session_state.results = []
+
+    results = st.session_state.results
+
+    if results:
+        st.subheader(f"🔎 {len(results)} result(s) found")
+
+    user_email = st.session_state.user["email"]
+    bookmarks = get_user_bookmarks(user_email)
+
+    for i, doc in enumerate(results, 1):
+        paper_id = doc["_id"]
+        if not paper_id:
+            continue
+
+        with st.expander(f"{i}. {doc.get('title', 'Untitled')}"):
+
+            # ---------- HEADER ROW ----------
+            h1, h2 = st.columns([12, 1])
+
+            with h2:
+                if paper_id in bookmarks:
+                    if st.button("⭐", key=f"rm_{paper_id}"):
+                        remove_bookmark(user_email, paper_id)
+                        st.rerun()
+                else:
+                    if st.button("☆", key=f"bm_{paper_id}"):
+                        add_bookmark(user_email, paper_id)
+                        st.rerun()
+
+            # ---------- METADATA GRID ----------
+            m1, m2, m3 = st.columns(3)
+
+            with m1:
+                st.markdown("**Authors**")
+                authors = doc.get("authors", [])
+                st.write(", ".join(authors) if authors else "Not available")
+
+            with m2:
+                st.markdown("**Year**")
+                st.write(doc.get("year", "Unknown"))
+
+            with m3:
+                st.markdown("**Category**")
+                st.write(doc.get("category", "Uncategorized"))
+
+            m4, m5 = st.columns(2)
+
+            with m4:
+                st.markdown("**DOI**")
+                st.write(doc.get("doi", "Not available"))
+
+            with m5:
+                st.markdown("**Source**")
+                st.write(doc.get("source", "Uploaded PDF"))
+
+            st.divider()
+
+            # ---------- ABSTRACT ----------
+            st.markdown("### 🧠 Abstract")
+            st.write(doc.get("abstract", "Abstract not available"))
+
+            # ---------- KEYWORDS ----------
+            keywords = doc.get("keywords", [])
+            if isinstance(keywords, list) and keywords:
+                st.markdown("### 🏷️ Keywords")
+                st.write(", ".join(keywords))
+            
+            # ---------- TOPICS (MODEL-DERIVED) ----------
+            topics = doc.get("topics", [])
+            if isinstance(topics, list) and topics:
+                st.markdown("### 🧠 Research Topics")
+                st.write(", ".join(topics))
+
+            # ---------- TOPICS / ENTITIES ----------
+            entities = doc.get("entities")
+            if isinstance(entities, list) and entities:
+                st.markdown("### 🧩 Extracted Topics")
+                st.write(", ".join(entities))
+
+            # ---------- SIMILAR PAPERS ----------
+            st.markdown("### 🔁 Similar Papers")
+
+            t_rec = time.perf_counter()
+            similar = get_similar_papers(doc.get("abstract", ""), top_n=5)
+            log_perf(
+                "recommend",
+                int((time.perf_counter() - t_rec) * 1000),
+                meta={"user": st.session_state.user["email"], "paper_id": str(paper_id)}
+            )
+
+            for sp in similar:
+                st.markdown(
+                    f"- **{sp['title']}** ({sp['category']}) — {round(sp['similarity_score'], 3)}"
+                )
+
+
+            # ---------- PDF DOWNLOAD (LAZY LOADING) ----------
+            if "file_id" in doc:
+                # Use a toggle to avoid loading bytes until needed
+                download_trigger = st.button("🔗 Generate Download Link", key=f"prep_{paper_id}")
+                
+                if download_trigger:
+                    pdf_data = get_pdf_bytes_cached(doc["file_id"])
+                    if pdf_data:
+                        st.download_button(
+                            "📥 Download PDF Now",
+                            data=pdf_data,
+                            file_name=safe_filename(doc.get("title")),
+                            mime="application/pdf",
+                            key=f"dl_btn_{paper_id}"
+                        )
+                    else:
+                        st.error("Could not retrieve PDF from storage.")

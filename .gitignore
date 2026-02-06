@@ -1,52 +1,85 @@
-# Ignore Python virtual environments
+# =============================
+# Python environments
+# =============================
 venv/
 metascan_env/
 env/
 
-# Ignore __pycache__ and compiled files
+# =============================
+# Python cache / compiled
+# =============================
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Ignore environment files
+# =============================
+# Environment / secrets
+# =============================
 .env
 .env.*
+.streamlit/secrets.toml
 
-# Ignore system files
+# =============================
+# System files
+# =============================
 .DS_Store
 Thumbs.db
 
-# Ignore log files
+# =============================
+# Logs
+# =============================
 *.log
 
-# Ignore editor/IDE configs
+# =============================
+# Editor / IDE
+# =============================
 .vscode/
 .idea/
 
-# Ignore Streamlit internal files
+# =============================
+# Streamlit internals
+# =============================
 .streamlit/
 
-# Ignore Jupyter / miscellaneous caches
+# =============================
+# Jupyter / misc caches
+# =============================
 .ipynb_checkpoints/
 share/
 
-# Ignore local MongoDB files (if any accidental dump)
+# =============================
+# MongoDB accidental dumps
+# =============================
 *.bson
 *.wt
 *.ns
 
-# Ignore build or temporary folders
+# =============================
+# Build / temp
+# =============================
 dist/
 build/
 temp/
 tmp/
 
-# Ignore large uploaded PDFs if accidentally added
+# =============================
+# Uploaded PDFs (runtime only)
+# =============================
+uploads/
 *.pdf
-!sample.pdf      # allow one sample PDF if needed
+!docs/*.pdf
+!sample.pdf
 
-# Don't ignore important project files
+# =============================
+# OAuth / auth leftovers
+# =============================
+token.json
+credentials.json
+
+# =============================
+# Keep important project files
+# =============================
 !.gitignore
 !*.py
 !*.json

@@ -1,32 +1,42 @@
-import streamlit as st
+import streamlit as st 
 import json
 from db import collection, db
 from bson import ObjectId
-from search import search_docs
+from search import render_search_module
 from enrich import enrich_and_update, enrich_pdf_metadata
 from pdf_extractor import process_pdf
 from ml.recommender import get_similar_papers
+from admin.user_management import show_user_management
+from admin.paper_management import show_paper_management
+from admin.admin_analytics import show_admin_analytics
+from admin.logger import log_auth, log_search, log_admin, log_perf
+import time
 import pandas as pd
 from collections import Counter
 import logging
-import bcrypt
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import re
 from io import BytesIO
 import plotly.express as px
+
+# NEW IMPORTS FOR GRIDFS
+from file_storage import save_pdf_to_gridfs, download_pdf_from_gridfs
+
+# ✅ AUTH (moved out)
+from auth.login_view import render_auth_page, users_collection
+
 logging.getLogger("streamlit.runtime.media_file_handler").setLevel(logging.ERROR)
 
-
-
 st.set_page_config(page_title="MetaScan", layout="wide")
+
 
 def safe_filename(name):
     if not name:
         return "paper.pdf"
-    # Remove newlines, tabs, and illegal header characters
-    name = re.sub(r'[\r\n\t]', ' ', str(name))
-    name = re.sub(r'[<>:"/\\|?*]', '', name)
+    name = re.sub(r"[\r\n\t]", " ", str(name))
+    name = re.sub(r'[<>:"/\\|?*]', "", name)
     return name.strip() + ".pdf"
+
 
 def get_pdf_stream(file_id):
     if not file_id:
@@ -44,35 +54,21 @@ def get_pdf_stream(file_id):
     st.session_state[cache_key].seek(0)
     return st.session_state[cache_key]
 
+
 def get_pdf_bytes_cached(file_id):
     if not file_id:
         return None
 
-    # Ensure file_id is a string to prevent BSON/Object mismatch in keys
     file_id_str = str(file_id)
-    cache_key = f"pdf_blob_{file_id_str}" # Change pdf_data_ to pdf_blob_
+    cache_key = f"pdf_blob_{file_id_str}"
 
     if cache_key not in st.session_state:
         pdf_bytes = download_pdf_from_gridfs(file_id)
         if not pdf_bytes:
             return None
-        # Store as bytes directly
         st.session_state[cache_key] = pdf_bytes
 
     return st.session_state[cache_key]
-
-
-# NEW IMPORTS FOR GRIDFS
-from file_storage import save_pdf_to_gridfs, download_pdf_from_gridfs
-
-# ================= AUTH SETUP =================
-users_collection = db["users"]
-
-def hash_password(password):
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt())
-
-def verify_password(password, hashed):
-    return bcrypt.checkpw(password.encode(), hashed)
 
 # Session defaults
 if "logged_in" not in st.session_state:
@@ -80,54 +76,25 @@ if "logged_in" not in st.session_state:
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# ================= LOGIN / REGISTER UI =================
+
+def is_admin():
+    return (
+        st.session_state.get("user") is not None
+        and st.session_state.user.get("role") == "admin"
+    )
+
+
+def admin_only():
+    if not is_admin():
+        st.error("⛔ Unauthorized access (Admin only)")
+        st.stop()
+
+# ================= LOGIN / REGISTER UI (MOVED OUT) =================
 if not st.session_state.logged_in:
-    st.markdown("## 🔐 MetaScan Authentication")
+    render_auth_page()
 
-    tab1, tab2 = st.tabs(["Login", "Register"])
 
-    with tab1:
-        email = st.text_input("Email")
-        password = st.text_input("Password", type="password")
-
-        if st.button("Login"):
-            user = users_collection.find_one({"email": email})
-            if user and verify_password(password, user["password"]):
-                st.session_state.logged_in = True
-                st.session_state.user = {
-                    "username": user["username"],
-                    "email": user["email"],
-                    "role": user["role"]
-                }
-                st.success("✅ Login successful")
-                st.rerun()
-            else:
-                st.error("❌ Invalid credentials")
-
-    with tab2:
-        username = st.text_input("Username")
-        reg_email = st.text_input("Register Email")
-        reg_password = st.text_input("Register Password", type="password")
-        confirm = st.text_input("Confirm Password", type="password")
-
-        if st.button("Create Account"):
-            if reg_password != confirm:
-                st.error("❌ Passwords do not match")
-            elif users_collection.find_one({"email": reg_email}):
-                st.error("❌ User already exists")
-            else:
-                users_collection.insert_one({
-                    "username": username,
-                    "email": reg_email,
-                    "password": hash_password(reg_password),
-                    "role": "researcher",
-                    "created_at": datetime.utcnow()
-                })
-                st.success("✅ Account created. Please login.")
-
-    st.stop()
-
-    # Sidebar navigation state
+# Sidebar navigation state
 if "active_module" not in st.session_state:
     st.session_state.active_module = "Dashboard"
 
@@ -348,7 +315,10 @@ if st.session_state.active_module == "Dashboard":
 st.sidebar.markdown("## 🧠 MetaScan")
 
 if st.session_state.get("user"):
-    st.sidebar.caption(f"👤 Logged in as **{st.session_state.user['username']}**")
+    st.sidebar.caption(
+        f"👤 Logged in as **{st.session_state.user['username']}**"
+        f"({st.session_state.user.get('role','user')})"
+    )
 
 st.sidebar.markdown("---")
 
@@ -363,27 +333,37 @@ def navigate(module_name, clear_results=True):
         st.session_state.results = []
     st.rerun()
 
-if st.sidebar.button("🏠 Dashboard", use_container_width=True):
+if st.sidebar.button("🏠 Dashboard", use_container_width="stretch"):
     navigate("Dashboard")
 
-if st.sidebar.button("📤 Upload Documents", use_container_width=True):
+if st.sidebar.button("📤 Upload Documents", use_container_width="stretch"):
     navigate("Upload")
 
-if st.sidebar.button("🔍 Search Papers", use_container_width=True):
+if st.sidebar.button("🔍 Search Papers", use_container_width="stretch"):
     navigate("Search", clear_results=False)
 
-if st.sidebar.button("⭐ Bookmarks", use_container_width=True):
+if st.sidebar.button("⭐ Bookmarks", use_container_width="stretch"):
     navigate("Bookmarks")
 
-if st.sidebar.button("📁 My Uploads", use_container_width=True):
+if st.sidebar.button("📁 My Uploads", use_container_width="stretch"):
     navigate("My Uploads")
 
-if st.sidebar.button("📊 Analytics", use_container_width=True):
+if st.sidebar.button("📊 Analytics", use_container_width="stretch"):
     navigate("Analytics")
+
+if is_admin():
+    st.sidebar.markdown("### 🔐 Admin")
+    if st.sidebar.button("👥 User Management", use_container_width="stretch"):
+        navigate("UserManagement") 
+    if st.sidebar.button("🗂️ Paper Management", use_container_width="stretch"):
+        navigate("PaperManagement") 
+    if st.sidebar.button("📊 Admin Analytics", use_container_width="stretch"):
+        navigate("AdminAnalytics")             
+
 
 st.sidebar.markdown("---")
 
-if st.sidebar.button("🚪 Logout", use_container_width=True):
+if st.sidebar.button("🚪 Logout", use_container_width="stretch"):
     # clear cached pdf bytes to avoid media.bin issues
     for k in list(st.session_state.keys()):
         if k.startswith("pdf_bytes_"):
@@ -395,6 +375,7 @@ if st.sidebar.button("🚪 Logout", use_container_width=True):
     st.session_state.results = []
     st.rerun()
 
+#UPLOAD LOGIC
 uploaded_file = None
 if st.session_state.active_module == "Upload":
     st.subheader("📤 Upload Documents")
@@ -404,8 +385,16 @@ if st.session_state.active_module == "Upload":
         type=["json", "pdf"]
     )
 
-
 if st.session_state.active_module == "Upload" and uploaded_file:
+    # ✅ Run-once guard (MUST be BEFORE saving to GridFS)
+    file_key = f"{uploaded_file.name}_{getattr(uploaded_file, 'size', '')}"
+    run_key = f"upload_ran_{file_key}"
+
+    if st.session_state.get(run_key):
+        st.info("This upload was already processed (prevented duplicate run).")
+        st.stop()
+    st.session_state[run_key] = True
+
     if uploaded_file.name.endswith(".json"):
         data = json.load(uploaded_file)
         if isinstance(data, list):
@@ -416,9 +405,14 @@ if st.session_state.active_module == "Upload" and uploaded_file:
             st.sidebar.success("✅ JSON uploaded & enriched")
 
     elif uploaded_file.name.endswith(".pdf"):
+        # Now safe: will run only once
         file_id = save_pdf_to_gridfs(uploaded_file)
         uploaded_file.seek(0)
 
+        user_email = st.session_state.user["email"]
+        filename = uploaded_file.name
+
+        t0 = time.perf_counter()
         paper_data = process_pdf(uploaded_file) or {
             "title": uploaded_file.name.replace(".pdf", ""),
             "abstract": "",
@@ -428,22 +422,35 @@ if st.session_state.active_module == "Upload" and uploaded_file:
             "category": "Uncategorized",
             "source": "PDF upload"
         }
+        log_perf(
+            "pdf_extract",
+            int((time.perf_counter() - t0) * 1000),
+            meta={"user": user_email, "filename": filename, "file_id": str(file_id)}
+        )
 
-# --- Attempt metadata enrichment ---
+        # --- Attempt metadata enrichment ---
         try:
+            t1 = time.perf_counter()
             enriched_data = enrich_pdf_metadata(paper_data)
+            log_perf(
+                "metadata_enrich",
+                int((time.perf_counter() - t1) * 1000),
+                meta={"user": user_email, "filename": filename, "file_id": str(file_id)}
+            )
         except Exception as e:
+            log_perf(
+                "metadata_enrich_fail",
+                0,
+                meta={"user": user_email, "filename": filename, "file_id": str(file_id), "error": str(e)}
+            )
             st.warning(f"⚠️ Metadata enrichment failed: {e}")
             enriched_data = paper_data
 
-        # 🔥 ADD THE FILE ID TO THE DOCUMENT
         enriched_data["file_id"] = file_id
 
-        # --- Preview extracted metadata ---
         st.subheader("🧾 Extracted Metadata Preview")
         st.json(enriched_data)
 
-        # --- Duplicate detection ---
         doi = enriched_data.get("doi")
         title = enriched_data.get("title", "").strip()
 
@@ -457,7 +464,7 @@ if st.session_state.active_module == "Upload" and uploaded_file:
             st.warning("⚠️ Duplicate detected — document already exists in the database.")
         else:
             try:
-                enriched_data["uploaded_by"] = st.session_state.user["email"]
+                enriched_data["uploaded_by"] = user_email
                 enriched_data["uploaded_at"] = datetime.now(timezone.utc)
                 collection.insert_one(enriched_data)
                 st.success("✅ PDF stored successfully!")
@@ -465,131 +472,15 @@ if st.session_state.active_module == "Upload" and uploaded_file:
                 logging.info(f"Inserted PDF: {title or 'Untitled'}")
             except Exception as e:
                 st.error(f"❌ Database insert failed: {e}")
-
-
-# ---------------- Search ----------------
+ #================= SEARCH SECTION =================
 if st.session_state.active_module == "Search":
-    st.subheader("🔍 Search Research Papers")
-
-    keyword = st.text_input("Keyword")
-    author = st.text_input("Author")
-    year = st.text_input("Year")
-    category = st.text_input("Category")
-
-    if st.button("Search"):
-        st.session_state.results = search_docs(keyword, author, year, category)
-
-
-# Always initialize results
-if "results" not in st.session_state:
-    st.session_state.results = []
-
-if st.session_state.active_module == "Search":
-    results = st.session_state.results
-
-    if results:
-        st.subheader(f"🔎 {len(results)} result(s) found")
-
-    user_email = st.session_state.user["email"]
-    bookmarks = get_user_bookmarks(user_email)
-
-    for i, doc in enumerate(results, 1):
-        paper_id = doc["_id"]
-        if not paper_id:
-            continue
-
-        with st.expander(f"{i}. {doc.get('title', 'Untitled')}"):
-
-            # ---------- HEADER ROW ----------
-            h1, h2 = st.columns([12, 1])
-
-            with h2:
-                if paper_id in bookmarks:
-                    if st.button("⭐", key=f"rm_{paper_id}"):
-                        remove_bookmark(user_email, paper_id)
-                        st.rerun()
-                else:
-                    if st.button("☆", key=f"bm_{paper_id}"):
-                        add_bookmark(user_email, paper_id)
-                        st.rerun()
-
-            # ---------- METADATA GRID ----------
-            m1, m2, m3 = st.columns(3)
-
-            with m1:
-                st.markdown("**Authors**")
-                authors = doc.get("authors", [])
-                st.write(", ".join(authors) if authors else "Not available")
-
-            with m2:
-                st.markdown("**Year**")
-                st.write(doc.get("year", "Unknown"))
-
-            with m3:
-                st.markdown("**Category**")
-                st.write(doc.get("category", "Uncategorized"))
-
-            m4, m5 = st.columns(2)
-
-            with m4:
-                st.markdown("**DOI**")
-                st.write(doc.get("doi", "Not available"))
-
-            with m5:
-                st.markdown("**Source**")
-                st.write(doc.get("source", "Uploaded PDF"))
-
-            st.divider()
-
-            # ---------- ABSTRACT ----------
-            st.markdown("### 🧠 Abstract")
-            st.write(doc.get("abstract", "Abstract not available"))
-
-            # ---------- KEYWORDS ----------
-            keywords = doc.get("keywords", [])
-            if isinstance(keywords, list) and keywords:
-                st.markdown("### 🏷️ Keywords")
-                st.write(", ".join(keywords))
-            
-            # ---------- TOPICS (MODEL-DERIVED) ----------
-            topics = doc.get("topics", [])
-            if isinstance(topics, list) and topics:
-                st.markdown("### 🧠 Research Topics")
-                st.write(", ".join(topics))
-
-            # ---------- TOPICS / ENTITIES ----------
-            entities = doc.get("entities")
-            if isinstance(entities, list) and entities:
-                st.markdown("### 🧩 Extracted Topics")
-                st.write(", ".join(entities))
-
-            # ---------- SIMILAR PAPERS ----------
-            st.markdown("### 🔁 Similar Papers")
-            for sp in get_similar_papers(doc.get("abstract", ""), top_n=5):
-                st.markdown(
-                    f"- **{sp['title']}** ({sp['category']}) — {round(sp['similarity_score'], 3)}"
-                )
-
-# ---------- PDF DOWNLOAD (LAZY LOADING) ----------
-            if "file_id" in doc:
-                # Use a toggle to avoid loading bytes until needed
-                download_trigger = st.button("🔗 Generate Download Link", key=f"prep_{paper_id}")
-                
-                if download_trigger:
-                    pdf_data = get_pdf_bytes_cached(doc["file_id"])
-                    if pdf_data:
-                        st.download_button(
-                            "📥 Download PDF Now",
-                            data=pdf_data,
-                            file_name=safe_filename(doc.get("title")),
-                            mime="application/pdf",
-                            key=f"dl_btn_{paper_id}"
-                        )
-                    else:
-                        st.error("Could not retrieve PDF from storage.")
-
-
-
+    render_search_module(
+        safe_filename=safe_filename,
+        get_pdf_bytes_cached=get_pdf_bytes_cached,
+        add_bookmark=add_bookmark,
+        remove_bookmark=remove_bookmark,
+        get_user_bookmarks=get_user_bookmarks
+    )
 # ================= BOOKMARKS SECTION =================
 if st.session_state.active_module == "Bookmarks":
     user_bookmark_ids = [
@@ -710,6 +601,20 @@ if st.session_state.active_module == "My Uploads":
                         )
                     else:
                         st.error("Could not retrieve PDF from storage.")
+
+# ================= ADMIN:Control Panel=================
+if st.session_state.active_module == "UserManagement":
+    admin_only()
+    show_user_management()
+
+if st.session_state.active_module == "PaperManagement":
+    admin_only()
+    show_paper_management()  
+
+if st.session_state.active_module == "AdminAnalytics":
+    admin_only()
+    show_admin_analytics()
+
 # ================= ANALYTICS DASHBOARD =================
 if st.session_state.active_module == "Analytics":
     st.subheader("📊 Research Analytics Overview")
@@ -763,7 +668,7 @@ if st.session_state.active_module == "Analytics":
 
             st.plotly_chart(
                 fig_cat,
-                use_container_width=True,
+                use_container_width="stretch",
                 key="analytics_category_donut"
             )
 
@@ -804,7 +709,7 @@ if st.session_state.active_module == "Analytics":
 
             st.plotly_chart(
                 fig_year,
-                use_container_width=True,
+                use_container_width="stretch",
                 key="analytics_year_area"
             )
 

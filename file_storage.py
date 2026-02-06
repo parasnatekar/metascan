@@ -2,8 +2,10 @@
 
 from bson import ObjectId
 from db import fs
+from db import db
 import gridfs
 
+fs = gridfs.GridFS(db)
 
 def save_pdf_to_gridfs(uploaded_pdf):
     """
@@ -58,3 +60,19 @@ def download_pdf_from_gridfs(file_id):
     except Exception as e:
         print(f"[!] Error retrieving PDF from GridFS: {e}")
         return None
+
+
+def delete_pdf_from_gridfs(file_id):
+    """
+    Deletes a PDF file from GridFS safely
+    """
+    if not file_id:
+        return
+
+    try:
+        if not isinstance(file_id, ObjectId):
+            file_id = ObjectId(file_id)
+        fs.delete(file_id)
+    except Exception as e:
+        # Log but do not crash admin flow
+        print(f"GridFS delete failed: {e}")
