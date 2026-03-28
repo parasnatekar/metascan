@@ -4,121 +4,72 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 def build_search_index(documents):
     corpus = []
-
     for doc in documents:
-        title = doc.get("title", "")
-        abstract = doc.get("abstract", "")
-        cleaned_text = doc.get("cleaned_text", "")
-
         keywords = doc.get("keywords", [])
-        if isinstance(keywords, list):
-            keywords = " ".join(keywords)
-
+        if isinstance(keywords, list): keywords = " ".join(keywords)
         topics = doc.get("topics", [])
-        if isinstance(topics, list):
-            topics = " ".join(topics)
-
+        if isinstance(topics, list): topics = " ".join(topics)
         entities = doc.get("entities", [])
-        if isinstance(entities, list):
-            entities = " ".join(entities)
-
+        if isinstance(entities, list): entities = " ".join(entities)
         authors = doc.get("authors", [])
-        if isinstance(authors, list):
-            authors = " ".join(authors)
-
-        category = doc.get("category", "")
-
+        if isinstance(authors, list): authors = " ".join(authors)
         combined_text = " ".join([
-            title,
-            abstract,
-            cleaned_text,
-            keywords,
-            topics,
-            entities,
-            authors,
-            category
+            doc.get("title", ""), doc.get("abstract", ""),
+            doc.get("cleaned_text", ""), keywords, topics,
+            entities, authors, doc.get("category", "")
         ]).strip()
-
         corpus.append(combined_text)
 
     vectorizer = TfidfVectorizer(
-        stop_words="english",
-        lowercase=True,
-        ngram_range=(1, 2),
-        sublinear_tf=True,
-        max_features=12000
+        stop_words="english", lowercase=True,
+        ngram_range=(1, 2), sublinear_tf=True, max_features=12000
     )
-
     tfidf_matrix = vectorizer.fit_transform(corpus)
-    return vectorizer, tfidf_matrix   
+    return vectorizer, tfidf_matrix
 
-# ---------------- TF-IDF Search ---------------- #
+
 def search_documents(keyword, documents, vectorizer, tfidf_matrix, top_n=20):
-    """
-    Rank documents by cosine similarity to the given keyword.
-    """
     if not keyword:
         return documents
-
     query_vec = vectorizer.transform([keyword.lower()])
     similarities = cosine_similarity(query_vec, tfidf_matrix).flatten()
-
-    # Sort documents by similarity score (highest first)
     ranked_indices = similarities.argsort()[::-1]
-
     results = []
     for idx in ranked_indices:
         score = float(similarities[idx])
-        if score <= 0:  # skip irrelevant results
+        if score <= 0:
             continue
         doc = documents[idx].copy()
-        # 🔥 CRITICAL: preserve MongoDB _id
         doc["_id"] = documents[idx]["_id"]
-        
         doc["similarity"] = round(score, 3)
         results.append(doc)
         if len(results) >= top_n:
             break
-
     return results
 
 
-# ---------------- Main Search Function ---------------- #
 def search_docs(keyword=None, author=None, year=None, category=None, limit=1000):
-    """
-    Search MongoDB documents by author, year, category, and keyword (TF-IDF).
-    """
-    # 1️⃣ MongoDB Filters
     query = {}
-    if author:
-        query["authors"] = {"$regex": f".*{author}.*", "$options": "i"}
-    if year:
-        query["year"] = str(year)
-    if category:
-        query["category"] = {"$regex": f".*{category}.*", "$options": "i"}
-
-    projection = {}  # DO NOT REMOVE _id
+    if author:   query["authors"]  = {"$regex": f".*{author}.*",   "$options": "i"}
+    if year:     query["year"]     = str(year)
+    if category: query["category"] = {"$regex": f".*{category}.*", "$options": "i"}
     mongo_results = list(collection.find(query).limit(limit))
-
-
     if not mongo_results:
         return []
-
-    # 2️⃣ Keyword Search (TF-IDF Ranking)
     if keyword:
         vectorizer, tfidf_matrix = build_search_index(mongo_results)
-        results = search_documents(keyword, mongo_results, vectorizer, tfidf_matrix, top_n=limit)
-    else:
-        results = mongo_results
-
-    return results
+        return search_documents(keyword, mongo_results, vectorizer, tfidf_matrix, top_n=limit)
+    return mongo_results
 
 
-# ================= STREAMLIT SEARCH UI (MOVED FROM DASHBOARD) =================
+# ================= STREAMLIT SEARCH UI =================
 import streamlit as st
 import time
 from ml.recommender import get_similar_papers
 from admin.logger import log_search, log_perf
+from summarizer import render_summary_card
+from qa import render_qa_panel
+
 
 def render_search_module(
     safe_filename,
@@ -127,147 +78,149 @@ def render_search_module(
     remove_bookmark,
     get_user_bookmarks
 ):
-    # ---------------- Search ----------------
-    st.subheader("🔍 Search Research Papers")
+    st.markdown("""
+    <div style="padding:28px 0 20px; border-bottom:1px solid rgba(255,255,255,0.06); margin-bottom:28px;">
+        <div style="font-family:'Space Mono',monospace; font-size:10px; color:#00E0FF;
+            letter-spacing:3px; margin-bottom:8px;">METASCAN // SEARCH</div>
+        <div style="font-family:'Syne',sans-serif; font-size:32px; font-weight:800;
+            color:#E8EDF2; letter-spacing:-0.5px;">Search Papers</div>
+        <div style="font-family:'Inter',sans-serif; font-size:14px; color:#5A6472; margin-top:6px;">
+            TF-IDF semantic search across the full research corpus</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    keyword = st.text_input("Keyword")
-    author = st.text_input("Author")
-    year = st.text_input("Year")
-    category = st.text_input("Category")
+    c1, c2 = st.columns([4, 1])
+    with c1:
+        keyword = st.text_input("", placeholder="🔍  Keyword, topic, or concept...",
+                                label_visibility="collapsed", key="search_keyword")
+    with c2:
+        search_clicked = st.button("Search →", use_container_width=True, key="search_btn")
 
-    if st.button("Search"):
-        st.session_state.results = search_docs(keyword, author, year, category)
+    fc1, fc2, fc3 = st.columns(3)
+    with fc1:
+        author   = st.text_input("", placeholder="Author name",      label_visibility="collapsed", key="search_author")
+    with fc2:
+        year     = st.text_input("", placeholder="Year e.g. 2023",   label_visibility="collapsed", key="search_year")
+    with fc3:
+        category = st.text_input("", placeholder="Category",          label_visibility="collapsed", key="search_category")
 
-        q = " ".join([
-            str(keyword or "").strip(),
-            str(author or "").strip(),
-            str(year or "").strip(),
-            str(category or "").strip()
-        ]).strip()
-
-        results_count = len(st.session_state.results or [])
-
+    if search_clicked:
+        with st.spinner("Searching..."):
+            st.session_state.results = search_docs(keyword, author, year, category)
+        q = " ".join([str(x or "").strip() for x in [keyword, author, year, category]]).strip()
         log_search(
             st.session_state.user["email"],
             q if q else "(empty)",
-            results_count,
+            len(st.session_state.results or []),
             filters={"keyword": keyword, "author": author, "year": year, "category": category}
         )
 
-
-    # Always initialize results
     if "results" not in st.session_state:
         st.session_state.results = []
 
     results = st.session_state.results
 
     if results:
-        st.subheader(f"🔎 {len(results)} result(s) found")
+        st.markdown(f"""
+        <div style="font-family:'Space Mono',monospace; font-size:10px; color:#5A6472;
+            letter-spacing:2px; margin:16px 0 12px;">
+            {len(results)} RESULT{'S' if len(results)!=1 else ''} FOUND
+        </div>""", unsafe_allow_html=True)
 
     user_email = st.session_state.user["email"]
-    bookmarks = get_user_bookmarks(user_email)
+    bookmarks  = get_user_bookmarks(user_email)
 
     for i, doc in enumerate(results, 1):
         paper_id = doc["_id"]
         if not paper_id:
             continue
 
-        with st.expander(f"{i}. {doc.get('title', 'Untitled')}"):
+        sim     = doc.get("similarity", None)
+        sim_str = f"  ·  score {sim:.3f}" if sim else ""
 
-            # ---------- HEADER ROW ----------
-            h1, h2 = st.columns([12, 1])
+        with st.expander(f"{i}.  {doc.get('title', 'Untitled')}{sim_str}"):
 
-            with h2:
+            # ── Bookmark ──
+            bm_col, _ = st.columns([1, 11])
+            with bm_col:
                 if paper_id in bookmarks:
                     if st.button("⭐", key=f"rm_{paper_id}"):
-                        remove_bookmark(user_email, paper_id)
-                        st.rerun()
+                        remove_bookmark(user_email, paper_id); st.rerun()
                 else:
                     if st.button("☆", key=f"bm_{paper_id}"):
-                        add_bookmark(user_email, paper_id)
-                        st.rerun()
+                        add_bookmark(user_email, paper_id); st.rerun()
 
-            # ---------- METADATA GRID ----------
+            # ── Metadata ──
             m1, m2, m3 = st.columns(3)
-
             with m1:
                 st.markdown("**Authors**")
                 authors = doc.get("authors", [])
                 st.write(", ".join(authors) if authors else "Not available")
-
             with m2:
                 st.markdown("**Year**")
                 st.write(doc.get("year", "Unknown"))
-
             with m3:
                 st.markdown("**Category**")
                 st.write(doc.get("category", "Uncategorized"))
 
             m4, m5 = st.columns(2)
-
             with m4:
                 st.markdown("**DOI**")
                 st.write(doc.get("doi", "Not available"))
-
             with m5:
                 st.markdown("**Source**")
                 st.write(doc.get("source", "Uploaded PDF"))
 
             st.divider()
 
-            # ---------- ABSTRACT ----------
+            # ── Abstract ──
             st.markdown("### 🧠 Abstract")
             st.write(doc.get("abstract", "Abstract not available"))
 
-            # ---------- KEYWORDS ----------
-            keywords = doc.get("keywords", [])
-            if isinstance(keywords, list) and keywords:
+            # ── AI Summary ──
+            st.markdown("### ✨ AI Summary")
+            render_summary_card(doc, key_prefix=str(paper_id))
+
+            st.divider()
+
+            # ── Paper Q&A  ◀ NEW ──
+            st.markdown("### 💬 Ask This Paper")
+            render_qa_panel(doc, key_prefix=f"search_{paper_id}")
+
+            st.divider()
+
+            # ── Keywords / Topics / Entities ──
+            kws = doc.get("keywords", [])
+            if isinstance(kws, list) and kws:
                 st.markdown("### 🏷️ Keywords")
-                st.write(", ".join(keywords))
-            
-            # ---------- TOPICS (MODEL-DERIVED) ----------
+                st.write(", ".join(kws))
+
             topics = doc.get("topics", [])
             if isinstance(topics, list) and topics:
                 st.markdown("### 🧠 Research Topics")
                 st.write(", ".join(topics))
 
-            # ---------- TOPICS / ENTITIES ----------
             entities = doc.get("entities")
             if isinstance(entities, list) and entities:
-                st.markdown("### 🧩 Extracted Topics")
+                st.markdown("### 🧩 Entities")
                 st.write(", ".join(entities))
 
-            # ---------- SIMILAR PAPERS ----------
+            # ── Similar Papers ──
             st.markdown("### 🔁 Similar Papers")
-
-            t_rec = time.perf_counter()
+            t_rec   = time.perf_counter()
             similar = get_similar_papers(doc.get("abstract", ""), top_n=5)
-            log_perf(
-                "recommend",
-                int((time.perf_counter() - t_rec) * 1000),
-                meta={"user": st.session_state.user["email"], "paper_id": str(paper_id)}
-            )
-
+            log_perf("recommend", int((time.perf_counter() - t_rec) * 1000),
+                     meta={"user": st.session_state.user["email"], "paper_id": str(paper_id)})
             for sp in similar:
-                st.markdown(
-                    f"- **{sp['title']}** ({sp['category']}) — {round(sp['similarity_score'], 3)}"
-                )
+                st.markdown(f"- **{sp['title']}** ({sp['category']}) — {round(sp['similarity_score'], 3)}")
 
-
-            # ---------- PDF DOWNLOAD (LAZY LOADING) ----------
+            # ── PDF Download ──
             if "file_id" in doc:
-                # Use a toggle to avoid loading bytes until needed
-                download_trigger = st.button("🔗 Generate Download Link", key=f"prep_{paper_id}")
-                
-                if download_trigger:
+                if st.button("🔗 Generate Download Link", key=f"prep_{paper_id}"):
                     pdf_data = get_pdf_bytes_cached(doc["file_id"])
                     if pdf_data:
-                        st.download_button(
-                            "📥 Download PDF Now",
-                            data=pdf_data,
+                        st.download_button("📥 Download PDF Now", data=pdf_data,
                             file_name=safe_filename(doc.get("title")),
-                            mime="application/pdf",
-                            key=f"dl_btn_{paper_id}"
-                        )
+                            mime="application/pdf", key=f"dl_btn_{paper_id}")
                     else:
                         st.error("Could not retrieve PDF from storage.")

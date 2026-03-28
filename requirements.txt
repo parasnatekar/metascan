@@ -13,3 +13,4 @@ plotly>=5.18
 joblib
 requests
 google-auth
+groq
